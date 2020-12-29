@@ -68,24 +68,53 @@ var inserterBuild = {
 	targetout: null,
 	targetitem: null,
 	targetArmRotate:0,
-	targetArmExtend:1,	
+	targetArmExtend:1,
 	
+	prevRotation:0,
+	
+	create( block,  team) {
+		this.super$create(block,team);
+		this.targetArmRotate=this.rotdeg(); 
+		this.armRotate=this.rotdeg(); 
+		return this;
+	},
 	findValidTransaction(frombuild,tobuild){
-		if(frombuild.items.empty()){return;}
+		if(!frombuild.items || frombuild.items.empty()){return;}
 		frombuild.items.each((item, amount) =>{
-			if(tobuild.acceptItem(this,item) && tobuild.items.get(item) < tobuild.block.itemCapacity ){
+			if(tobuild.acceptItem(this,item) && (!tobuild.items || tobuild.items.get(item) < tobuild.block.itemCapacity) ){
 				this.targetout = tobuild;
 				this.targetin = frombuild;
 				this.targetitem = item;
 			}
 		});
-		
+	},
+	//uh yeh find a way.
+	findValidPayloadTransaction(frombuild,tobuild){
+		if(!frombuild.items || frombuild.items.empty()){return;}
+		frombuild.items.each((item, amount) =>{
+			if(tobuild ==null && !(frombuild instanceof PayloadConveyor || frombuild instanceof PayloadAcceptor)){
+				this.targetout = tobuild;
+				this.targetin = frombuild;
+				this.targetitem = item;
+			}
+		});
 	},
 	
 	updateTile(){
-		this.progress += this.efficiency();
+		if(this.prevRotation!=this.rotation){
+			this.targetArmRotate=this.rotdeg(); 
+			this.armRotate=this.rotdeg(); 
+			this.progress=0;
+			this.pickingup = true; 
+			this.targetout = null;
+			this.grabbed = null;
+			this.grabbedAmount=0;
+			this.prevRotation=this.rotation;
+		}
 		
-		let movesped = (1.0/this.block.getMoveDelay())*this.efficiency();
+		this.progress += this.edelta();
+		
+		let movesped = (1.0/this.block.getMoveDelay())*this.edelta();
 		this.armExtend += (this.targetArmExtend - this.armExtend)*movesped;
 		this.armRotate = Angles.moveToward(this.armRotate,this.targetArmRotate,180.0*movesped);
 		
@@ -95,103 +124,137 @@ var inserterBuild = {
 		}
 		
 		var toRot = (this.rotation+2)%4; // the other 'side'
-		if(this.pickingup){
-			/*
-				1. search through list of output blocks
-				2. search through list of input blocks
-				3. find first pair of valid input -> output item insertions
-				4. Attempt grab and insert
-				4. repeat.
-			*/
-			this.timeoutWait += Time.delta;
-			if(this.targetout){ // there was a detected valid transaction so were gonna try extracting items.
-				var itemsavail = this.targetin.items.get(this.targetitem);
-				if(itemsavail==0){
-					if(this.timeoutWait>maxWait){
-						if(this.grabbedAmount==0){
-							this.targetout=null; //waited for a while and got nothing, gonna try another input.
-							this.timeoutWait=0;
-						}else{
-							this.pickingup = false; // waited for a while, got stuff but wasnt full, oh well, continue on.
-							this.targetArmRotate=this.rotdeg()+180.0;
-							this.progress=0;
-							this.timeoutWait=0;
+		//not done
+		if(this.block.getGrabSize()>1){
+			if(this.pickingup){
+				this.timeoutWait += Time.delta;
+				if(this.targetout){ 
+					
+				}
+				for(var k = this.block.getGrabFrom();k<=this.block.getGrabTo();k++){
+					var tobuild = this.nearby(dirs[toRot].x * k, dirs[toRot].y * k);
+					if(tobuild){
+						continue;
+					}
+					if(this.targetin==null){
+						for(var i = this.block.getGrabFrom();i<=this.block.getGrabTo();i++){
+							var frombuild = this.nearby(dirs[this.rotation].x * i, dirs[this.rotation].y * i);
+							if(!frombuild){continue;}
+							this.findValidTransaction(frombuild,tobuild);
+							if(this.targetin){
+								this.targetArmExtend = i;
+								if(Math.abs(this.armExtend-this.targetArmExtend)>0.1){
+									this.progress = 0;
+								}
+								break;
+							}
 						}
+					}
+				}
+				
+			}else{
+				
+			}
+			
+		}else{
+			if(this.pickingup){
+				/*
+					1. search through list of output blocks
+					2. search through list of input blocks
+					3. find first pair of valid input -> output item insertions
+					4. Attempt grab and insert
+					4. repeat.
+				*/
+				this.timeoutWait += Time.delta;
+				if(this.targetout){ // there was a detected valid transaction so were gonna try extracting items.
+					var itemsavail = this.targetin.items.get(this.targetitem);
+					if(itemsavail==0){
+						if(this.timeoutWait>maxWait){
+							if(this.grabbedAmount==0){
+								this.targetout=null; //waited for a while and got nothing, gonna try another input.
+								this.timeoutWait=0;
+							}else{
+								this.pickingup = false; // waited for a while, got stuff but wasnt full, oh well, continue on.
+								this.targetArmRotate=this.rotdeg()+180.0;
+								this.progress=0;	
+								this.timeoutWait=0;
+							}
+						}
+						return;
+					}
+					var takeam = Math.min(itemsavail,this.block.getStackSize());
+					this.targetin.removeStack(this.targetitem,takeam);
+					this.grabbedAmount+=takeam;
+					this.grabbed = this.targetitem;
+					this.timeoutWait=0;
+					if(this.grabbedAmount == this.block.getStackSize()){ //its full we're ready to deliver :D
+						this.targetArmRotate=this.rotdeg()+180.0;
+						this.progress=0;
+						this.pickingup = false; 
 					}
 					return;
 				}
-				var takeam = Math.min(itemsavail,this.block.getStackSize());
-				this.targetin.items.remove(this.targetitem,takeam);
-				this.grabbedAmount+=takeam;
-				this.grabbed = this.targetitem;
-				this.timeoutWait=0;
-				if(this.grabbedAmount == this.block.getStackSize()){ //its full we're ready to deliver :D
-					this.targetArmRotate=this.rotdeg()+180.0;
-					this.progress=0;
-					this.pickingup = false; 
-				}
-				return;
-			}
-			
-			for(var k = this.block.getGrabFrom();k<=this.block.getGrabTo();k++){
-				var tobuild = this.nearby(dirs[toRot].x * k, dirs[toRot].y * k);
-				if(!tobuild){continue;}
 				
-				if(this.timeoutWait>maxWait){
-					this.targetin=null;
-				}
-				if(this.targetin==null){
-					for(var i = this.block.getGrabFrom();i<=this.block.getGrabTo();i++){
-						var frombuild = this.nearby(dirs[this.rotation].x * i, dirs[this.rotation].y * i);
-						if(!frombuild){continue;}
-						this.findValidTransaction(frombuild,tobuild);
-						if(this.targetin){
-							this.targetArmExtend = i;
-							if(Math.abs(this.armExtend-this.targetArmExtend)>0.1){
-								this.progress = 0;
-							}
-							break;
-						}
+				for(var k = this.block.getGrabFrom();k<=this.block.getGrabTo();k++){
+					var tobuild = this.nearby(dirs[toRot].x * k, dirs[toRot].y * k);
+					if(!tobuild){continue;}
+					
+					if(this.timeoutWait>maxWait){
+						this.targetin=null;
 					}
-				}else{
-					this.findValidTransaction(this.targetin,tobuild);
-				}
-				
-				if(this.targetout!=null){
-					this.timeoutWait = 0;
+					if(this.targetin==null){
+						for(var i = this.block.getGrabFrom();i<=this.block.getGrabTo();i++){
+							var frombuild = this.nearby(dirs[this.rotation].x * i, dirs[this.rotation].y * i);
+							if(!frombuild){continue;}
+							this.findValidTransaction(frombuild,tobuild);
+							if(this.targetin){
+								this.targetArmExtend = i;
+								if(Math.abs(this.armExtend-this.targetArmExtend)>0.1){
+									this.progress = 0;
+								}
+								break;
+							}
+						}
+					}else{
+						this.findValidTransaction(this.targetin,tobuild);
+					}
 					
-					break;
-				}
-			}
-		}else{
-			this.timeoutWait += Time.delta;
-			if(this.targetout){
-				if(this.targetout.acceptItem(this,this.grabbed)){ //deposit item
-					this.targetout.handleItem(this,this.grabbed);
-					this.grabbedAmount--;
-					this.timeoutWait =0;
-				}
-				if(this.grabbedAmount==0){ //arm has no more items, pickup mode again
-					this.targetArmRotate=this.rotdeg();
-					this.progress=0;
-					this.pickingup = true; 
-					this.targetout = null;
-					this.grabbed = null;
-					
+					if(this.targetout!=null){
+						this.timeoutWait = 0;
+						
+						break;
+					}
 				}
 			}else{
-				if(this.grabbedAmount==0){ //edge case where the arm might start in output mode
-					this.pickingup = true; 
-					this.progress=0;
+				this.timeoutWait += Time.delta;
+				if(this.targetout){
+					if(this.targetout.acceptItem(this,this.grabbed)){ //deposit item
+						this.targetout.handleItem(this,this.grabbed);
+						this.grabbedAmount--;
+						this.timeoutWait =0;
+					}
+					if(this.grabbedAmount==0){ //arm has no more items, pickup mode again
+						this.targetArmRotate=this.rotdeg();
+						this.progress=0;
+						this.pickingup = true; 
+						this.targetout = null;
+						this.grabbed = null;
+						
+					}
+				}else{
+					if(this.grabbedAmount==0){ //edge case where the arm might start in output mode
+						this.pickingup = true; 
+						this.progress=0;
+					}
+					
 				}
+				// todo: 
+				// - timeout for outputs.
+				// - sprite outlines.
+				// - saving/loading state
+				// - payload
 				
 			}
-			// todo: - timeout for outputs.
-			// - display held item
-			// - sprite outlines.
-			// - saving/loading state
-			// - set starting face direction the same as block rotation.
-			
 		}
 	},
 	draw(){
@@ -199,10 +262,23 @@ var inserterBuild = {
 		
 		var armx = Mathf.cosDeg(this.armRotate) * this.armExtend * Vars.tilesize;
 		var army = Mathf.sinDeg(this.armRotate) * this.armExtend * Vars.tilesize;
+		var graboffset = (this.armExtend * Vars.tilesize + 3)/(this.armExtend * Vars.tilesize);
 		Lines.stroke(4);
 		Draw.z(Layer.turret);
+		Draw.color(Pal.shadow);
+		Lines.line(this.block.getArmSprite(), this.x, this.y,     this.x+armx-(this.block.size*2), this.y+army-(this.block.size*2), false);
+		Draw.rect(this.block.getClawSprites()[this.pickingup?0:1],this.x+armx-(this.block.size*2), this.y+army-(this.block.size*2), this.armRotate);
+		Draw.color();
 		Lines.line(this.block.getArmSprite(), this.x,this.y, this.x+armx, this.y+army, false);
 		Draw.rect(this.block.getClawSprites()[this.pickingup?0:1],this.x+armx,this.y+army,this.armRotate);
+		if(this.grabbed){
+			if(this.grabbed instanceof Item){
+				Draw.rect(this.grabbed.icon(Cicon.small),this.x+armx*graboffset,this.y+army*graboffset,this.armRotate);
+			}else if(this.grabbed instanceof Payload){
+				this.grabbed.set(this.x+armx*graboffset,this.y+army*graboffset, this.armRotate);
+				this.grabbed.draw();
+			}
+		}
 	}
 	
 }
