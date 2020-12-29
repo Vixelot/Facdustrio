@@ -3,7 +3,7 @@
     "description": "Most basic of materials",
     "hardness": 0.1,
     "cost": 0.10,
-    "color":  "7b7f8e",
+    "color":  "847e87",
     "lowPriority": true, 
     "alwaysUnlocked": true
 } 
