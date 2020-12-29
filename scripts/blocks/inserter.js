@@ -13,6 +13,6 @@ heavyInserter.buildType = ()=> extendContent(Building, (inserterLib.build()));
 heavyInserter.update = true;
 heavyInserter.hasPower = true;
 heavyInserter.rotate=true;
-heavyInserter.setGrabSize(64);
+heavyInserter.setGrabSize(Vars.tilePayload);
 heavyInserter.setMoveDelay(40);
 heavyInserter.consumes.power(1.0);
