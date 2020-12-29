@@ -1,0 +1,18 @@
+{
+    "name":"Burner Furnace",
+    "type":"GenericCrafter",
+    "size":2,
+    "outputItem": {"item": "copper", "amount": 10},
+    "consumes": {
+        "items": {
+            "items": [
+                { "item": "coal", "amount": 1},
+                { "item": "copper-ore", "amount": 10}
+            ]
+        }
+    },
+    "requirements": [
+        { "item": "stone", "amount": 5 }
+	],
+    "category": "crafting"
+} 
