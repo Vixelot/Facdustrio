@@ -1,0 +1,9 @@
+{
+    "name": "Stone",
+    "description": "Most basic of materials",
+    "hardness": 0.1,
+    "cost": 0.10,
+    "color":  "7b7f8e",
+    "lowPriority": true, 
+    "alwaysUnlocked": true
+} 
