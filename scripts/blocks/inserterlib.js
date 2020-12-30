@@ -1,3 +1,4 @@
+
 //i dont wish to rewrite the same code over and over, so these are template objects for all inserters.
 
 const dirs = [{x: 1,y: 0},{x: 0,y: 1},{x: -1,y: 0},{x: 0,y: -1}]; // directions for rotations
@@ -19,6 +20,10 @@ function deepCopy(obj) {
 			clone[i] = obj[i];
 	}
 	return clone;
+}
+
+function isPayloadBlock(build){
+	return build.block instanceof PayloadConveyor || build.block instanceof PayloadAcceptor;
 }
 var inserterBlock = {
 	_moveDelay:10.0,
@@ -81,33 +86,64 @@ var inserterBuild = {
 		this.armRotate=this.rotdeg(); 
 		return this;
 	},
+	canGrabBuilding(thing){
+		return this.block.getGrabSize()+0.01>= Vars.tilePayload * thing.block.size * thing.block.size;
+	},
+	
 	findValidTransaction(frombuild,tobuild){
-		if(!frombuild.items || frombuild.items.empty()){return;}
+		if(!frombuild.items || frombuild.items.empty()){return false;}
 		frombuild.items.each((item, amount) =>{
 			if(tobuild.acceptItem(this,item) && (!tobuild.items || tobuild.items.get(item) < tobuild.block.itemCapacity) ){
 				this.targetout = tobuild;
 				this.targetin = frombuild;
 				this.targetitem = item;
+				this.foundtarget = true;
+				return true;
 			}
 		});
+		return false;
 	},
+	
+	
 	//uh yeh find a way.
 	findValidPayloadTransaction(frombuild,totile){
+		if(isPayloadBlock(frombuild)){
+			// grab payload.
+			return false;
+		} 
+		if(!this.canGrabBuilding(frombuild)){
+			return false;
+		}
 		//moving to empty space
 		if(totile.build ==null){
-			if(!(frombuild instanceof PayloadConveyor || frombuild instanceof PayloadAcceptor) 
-				&&  this.block.getGrabSize()+0.01>= Vars.tilePayload * frombuild.block.size * frombuild.block.size
-				&&  Build.validPlace(frombuild.block, frombuild.team, totile.x, totile.y, frombuild.rotation, false )){//not a payload
-				
+			if(Build.validPlace(frombuild.block, frombuild.team, totile.x, totile.y, frombuild.rotation, false )){//not a payload
 				this.targetout = totile;
 				this.targetin = frombuild;
 				this.foundtarget = true;
 				this.targetpayload = false;
 				return true;
 			}
+		}else if(isPayloadBlock(totile.build) && totile.build.acceptPayload(this,new BuildPayload(frombuild))){
+			this.targetout = totile;
+			this.targetin = frombuild;
+			this.foundtarget = true;
+			this.targetpayload = false;
+			return true;
 		}
 		return false;
 		//moving payload
+	},
+	
+	resetToPickup(){
+		this.targetArmRotate=this.rotdeg();
+		this.progress=0;
+		this.pickingup = true; 
+		this.targetout = null;
+		this.targetin=null;
+		this.grabbed = null;
+		this.foundtarget = false;
+		this.grabbedAmount = 0;
+		this.timeoutWait =0;
 	},
 	
 	updateTile(){
@@ -134,10 +170,10 @@ var inserterBuild = {
 		}
 		
 		var toRot = (this.rotation+2)%4; // the other 'side'
+		this.timeoutWait += Time.delta;
 		//not done
 		if(this.block.getGrabSize()>1){
 			if(this.pickingup){
-				this.timeoutWait += Time.delta;
 				if(this.foundtarget){ 
 					if(!this.findValidPayloadTransaction(this.targetin,this.targetout)){
 						this.foundtarget=false;
@@ -156,7 +192,8 @@ var inserterBuild = {
 				}
 				for(var k = this.block.getGrabFrom();k<=this.block.getGrabTo();k++){
 					var totile = this.tile.nearby(dirs[toRot].x * k, dirs[toRot].y * k);
-					if(totile.build){
+					if(totile.build && !isPayloadBlock(totile.build)){
+						
 						continue;
 					}
 					if(this.targetin==null){
@@ -177,16 +214,17 @@ var inserterBuild = {
 				
 			}else{
 				if(!this.targetpayload){
-					if(Build.validPlace(this.grabbed.block(), this.grabbed.build.team, this.targetout.x, this.targetout.y, this.grabbed.build.rotation, false )){
-						this.grabbed.place(this.targetout, this.grabbed.build.rotation);
-						Fx.placeBlock.at(this.targetout.drawx(), this.targetout.drawy(), this.targetout.block().size);
-						this.targetArmRotate=this.rotdeg();
-						this.progress=0;
-						this.pickingup = true; 
-						this.targetout = null;
-						this.targetin=null;
-						this.grabbed = null;
-						this.foundtarget = false;
+					if(this.grabbed instanceof BuildPayload){
+						if(Build.validPlace(this.grabbed.block(), this.grabbed.build.team, this.targetout.x, this.targetout.y, this.grabbed.build.rotation, false )){ // place on the ground
+							this.grabbed.place(this.targetout, this.grabbed.build.rotation);
+							Fx.placeBlock.at(this.targetout.drawx(), this.targetout.drawy(), this.targetout.block().size);
+							this.resetToPickup();
+						}else if(this.targetout.build && isPayloadBlock(this.targetout.build)){ // place on the payload
+							if(this.targetout.build.acceptPayload(this,this.grabbed)){
+								this.targetout.build.handlePayload(this,this.grabbed);
+								this.resetToPickup();
+							}
+						}
 					}
 				}
 			}
@@ -200,7 +238,7 @@ var inserterBuild = {
 					4. Attempt grab and insert
 					4. repeat.
 				*/
-				this.timeoutWait += Time.delta;
+				
 				if(this.targetout){ // there was a detected valid transaction so were gonna try extracting items.
 					var itemsavail = this.targetin.items.get(this.targetitem);
 					if(itemsavail==0){
@@ -261,7 +299,6 @@ var inserterBuild = {
 					}
 				}
 			}else{
-				this.timeoutWait += Time.delta;
 				if(this.targetout){
 					if(this.targetout.acceptItem(this,this.grabbed)){ //deposit item
 						this.targetout.handleItem(this,this.grabbed);
@@ -269,17 +306,11 @@ var inserterBuild = {
 						this.timeoutWait =0;
 					}
 					if(this.grabbedAmount==0){ //arm has no more items, pickup mode again
-						this.targetArmRotate=this.rotdeg();
-						this.progress=0;
-						this.pickingup = true; 
-						this.targetout = null;
-						this.grabbed = null;
-						
+						this.resetToPickup();
 					}
 				}else{
 					if(this.grabbedAmount==0){ //edge case where the arm might start in output mode
-						this.pickingup = true; 
-						this.progress=0;
+						this.resetToPickup();
 					}
 					
 				}

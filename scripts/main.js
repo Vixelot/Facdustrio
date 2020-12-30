@@ -1,3 +1,7 @@
 require("facdustrio/blocks/inserterlib");
 require("facdustrio/blocks/inserter");
-print("yes");
+
+Events.on(EventType.ClientLoadEvent, 
+cons(e => {
+	Blocks.blockForge.buildVisibility = BuildVisibility.shown
+}));
