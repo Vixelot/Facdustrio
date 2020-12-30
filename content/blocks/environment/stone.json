@@ -1,3 +1,4 @@
 {
-    "itemDrop":"facdustrio-stone"
+    "itemDrop":"facdustrio-stone",
+    "playerUnmineable": true
 } 
