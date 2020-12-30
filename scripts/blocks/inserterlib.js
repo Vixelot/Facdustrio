@@ -27,7 +27,7 @@ function isPayloadBlock(build){
 }
 var inserterBlock = {
 	_moveDelay:10.0,
-	_grabSize: 1, //1 - items only, anything .>=64 will do payloads (not implemented)
+	_grabSize: 1, //1 - items only, anything .>=64 will do payloads 
 	_stackSize: 1, // for stack inserters
 	_grabFrom: 1,//minimum grabbing range
 	_grabTo: 1,//maximum grabbing range
@@ -106,28 +106,52 @@ var inserterBuild = {
 	
 	
 	//uh yeh find a way.
-	findValidPayloadTransaction(frombuild,totile){
+	findValidPayloadTransaction(fromtile,totile){
+		var frombuild = fromtile.build;
+		if(!frombuild){return false;}
 		if(isPayloadBlock(frombuild)){
-			// grab payload.
-			return false;
+			let contained = frombuild.getPayload();
+			let px=0;
+			let py=0;
+			if(!contained){
+				return false;
+			}
+			if(contained instanceof UnitPayload){
+				px = contained.unit.x;
+				py = contained.unit.y;
+			}else{
+				px = contained.build.x;
+				py = contained.build.y;
+			}
+			if(Mathf.dst(fromtile.getX(),fromtile.getY(), px, py)<8){
+				// grab payload.
+				this.targetpayload = true;
+			}else {
+				return false;
+			}
+		}else{
+			this.targetpayload = false;
 		} 
-		if(!this.canGrabBuilding(frombuild)){
+		if(!this.canGrabBuilding(frombuild) && !this.targetpayload){
 			return false;
+		}
+		//t
+		let payload = new BuildPayload(frombuild);
+		if(this.targetpayload){
+			payload = frombuild.getPayload();
 		}
 		//moving to empty space
 		if(totile.build ==null){
-			if(Build.validPlace(frombuild.block, frombuild.team, totile.x, totile.y, frombuild.rotation, false )){//not a payload
+			if(payload instanceof UnitPayload || (payload instanceof BuildPayload && Build.validPlace(payload.build.block, payload.build.team, totile.x, totile.y, payload.build.rotation, false ))){
 				this.targetout = totile;
-				this.targetin = frombuild;
+				this.targetin = fromtile;
 				this.foundtarget = true;
-				this.targetpayload = false;
 				return true;
 			}
-		}else if(isPayloadBlock(totile.build) && totile.build.acceptPayload(this,new BuildPayload(frombuild))){
+		}else if(isPayloadBlock(totile.build) && totile.build.acceptPayload(this,payload)){
 			this.targetout = totile;
-			this.targetin = frombuild;
+			this.targetin = fromtile;
 			this.foundtarget = true;
-			this.targetpayload = false;
 			return true;
 		}
 		return false;
@@ -144,6 +168,14 @@ var inserterBuild = {
 		this.foundtarget = false;
 		this.grabbedAmount = 0;
 		this.timeoutWait =0;
+	},
+	grabAndDrop(grab, am){
+		this.grabbedAmount = am;
+		this.grabbed = grab;
+		this.pickingup = false; 
+		this.targetArmRotate=this.rotdeg()+180.0;
+		this.progress=0;	
+		this.timeoutWait=0;
 	},
 	
 	updateTile(){
@@ -181,12 +213,11 @@ var inserterBuild = {
 						return;
 					}
 					if(!this.targetpayload){
-						this.targetin.tile.remove();
-						this.grabbed = new BuildPayload(this.targetin);
-						this.pickingup = false; 
-						this.targetArmRotate=this.rotdeg()+180.0;
-						this.progress=0;	
-						this.timeoutWait=0;
+						this.grabAndDrop(new BuildPayload(this.targetin.build),1);
+						this.targetin.remove();
+						return;
+					}else{
+						this.grabAndDrop(this.targetin.build.takePayload(),1);
 						return;
 					}
 				}
@@ -198,9 +229,10 @@ var inserterBuild = {
 					}
 					if(this.targetin==null){
 						for(var i = this.block.getGrabFrom();i<=this.block.getGrabTo();i++){
-							var frombuild = this.nearby(dirs[this.rotation].x * i, dirs[this.rotation].y * i);
-							if(!frombuild){continue;}
-							this.findValidPayloadTransaction(frombuild,totile);
+							var fromtile = this.tile.nearby(dirs[this.rotation].x * i, dirs[this.rotation].y * i);
+							if(!fromtile){continue;}
+							if(!fromtile.build){continue;}
+							this.findValidPayloadTransaction(fromtile,totile);
 							if(this.targetin){
 								this.targetArmExtend = i;
 								if(Math.abs(this.armExtend-this.targetArmExtend)>0.1){
@@ -213,18 +245,27 @@ var inserterBuild = {
 				}
 				
 			}else{
-				if(!this.targetpayload){
-					if(this.grabbed instanceof BuildPayload){
-						if(Build.validPlace(this.grabbed.block(), this.grabbed.build.team, this.targetout.x, this.targetout.y, this.grabbed.build.rotation, false )){ // place on the ground
-							this.grabbed.place(this.targetout, this.grabbed.build.rotation);
-							Fx.placeBlock.at(this.targetout.drawx(), this.targetout.drawy(), this.targetout.block().size);
-							this.resetToPickup();
-						}else if(this.targetout.build && isPayloadBlock(this.targetout.build)){ // place on the payload
-							if(this.targetout.build.acceptPayload(this,this.grabbed)){
-								this.targetout.build.handlePayload(this,this.grabbed);
-								this.resetToPickup();
-							}
-						}
+				if(this.targetout.build && isPayloadBlock(this.targetout.build)){ // place on the payload
+					if(this.targetout.build.acceptPayload(this,this.grabbed)){
+						this.targetout.build.handlePayload(this,this.grabbed);
+						this.resetToPickup();
+						return;
+					}
+					if(this.timeoutWait<50.0){ // wait a bit, if it doesnt wanna accpet the payload then just dump it on the ground.
+						return;
+					}
+				}
+				if(this.grabbed instanceof BuildPayload){
+					if(Build.validPlace(this.grabbed.block(), this.grabbed.build.team, this.targetout.x, this.targetout.y, this.grabbed.build.rotation, false )){ // place on the ground
+						this.grabbed.place(this.targetout, this.grabbed.build.rotation);
+						Fx.placeBlock.at(this.targetout.drawx(), this.targetout.drawy(), this.targetout.block().size);
+						this.resetToPickup();
+					}
+				}else{//its a unit
+					this.grabbed.set(this.targetout.getX(), this.targetout.getY(), this.grabbed.unit.rotation);
+					if(this.grabbed.dump()){
+						Fx.unitDrop.at(this.targetout);
+						this.resetToPickup();
 					}
 				}
 			}
