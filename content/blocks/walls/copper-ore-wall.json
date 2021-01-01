@@ -1,0 +1,8 @@
+{
+	"size": 1,
+	"health": 160,
+	"requirements": [
+		{"item": "copper-ore", "amount": 6},
+	],
+	"category": "defense",
+}

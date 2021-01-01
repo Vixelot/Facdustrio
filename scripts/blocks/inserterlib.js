@@ -1,26 +1,7 @@
-
+const FuncLib = require("facdustrio/funcs");
 //i dont wish to rewrite the same code over and over, so these are template objects for all inserters.
 
 const dirs = [{x: 1,y: 0},{x: 0,y: 1},{x: -1,y: 0},{x: 0,y: -1}]; // directions for rotations
-function deepCopy(obj) {
-	var clone = {};
-	for (var i in obj) {
-		if (Array.isArray(obj[i])) {
-			clone[i] = [];
-			for (var z in obj[i]) {
-				if (typeof(obj[i][z]) == "object" && obj[i][z] != null) {
-					clone[i][z] = deepCopy(obj[i][z]);
-				} else {
-					clone[i][z] = obj[i][z];
-				}
-			}
-		} else if (typeof(obj[i]) == "object" && obj[i] != null)
-			clone[i] = deepCopy(obj[i]);
-		else
-			clone[i] = obj[i];
-	}
-	return clone;
-}
 
 function isPayloadBlock(build){
 	return build.block instanceof PayloadConveyor || build.block instanceof PayloadAcceptor;
@@ -86,10 +67,18 @@ var inserterBuild = {
 		this.armRotate=this.rotdeg(); 
 		return this;
 	},
+	onRemoved(){
+		this.super$onRemoved();
+		if(this.grabbed&& this.grabbed instanceof Payload){ 
+			this.grabbed.dump();
+		}
+	},
 	canGrabBuilding(thing){
 		return this.block.getGrabSize()+0.01>= Vars.tilePayload * thing.block.size * thing.block.size;
 	},
-	
+	canGrabUnit(unit){
+		return this.block.getGrabSize()+0.01>= Vars.tilePayload * unit.hitSize * unit.hitSize;
+	},
 	findValidTransaction(frombuild,tobuild){
 		if(!frombuild.items || frombuild.items.empty()){return false;}
 		frombuild.items.each((item, amount) =>{
@@ -108,35 +97,47 @@ var inserterBuild = {
 	//uh yeh find a way.
 	findValidPayloadTransaction(fromtile,totile){
 		var frombuild = fromtile.build;
-		if(!frombuild){return false;}
-		if(isPayloadBlock(frombuild)){
-			let contained = frombuild.getPayload();
-			let px=0;
-			let py=0;
-			if(!contained){
+		let payload = null;
+		if(!frombuild){
+			//perhaps a unit has wandered nearby ready to be sent to brazil
+			var unit = Units.closest(this.team,fromtile.getX(),fromtile.getY(),6,(u)=>{
+				return u.isAI() && u.isGrounded();
+			});
+			if(!unit){
 				return false;
 			}
-			if(contained instanceof UnitPayload){
-				px = contained.unit.x;
-				py = contained.unit.y;
-			}else{
-				px = contained.build.x;
-				py = contained.build.y;
-			}
-			if(Mathf.dst(fromtile.getX(),fromtile.getY(), px, py)<8){
-				// grab payload.
-				this.targetpayload = true;
-			}else {
-				return false;
-			}
-		}else{
+			payload = new UnitPayload(unit);
 			this.targetpayload = false;
-		} 
-		if(!this.canGrabBuilding(frombuild) && !this.targetpayload){
-			return false;
 		}
-		//t
-		let payload = new BuildPayload(frombuild);
+		if(!payload){ // if a unit wasnt detected...
+			if(isPayloadBlock(frombuild)){
+				let contained = frombuild.getPayload();
+				let px=0;
+				let py=0;
+				if(!contained){
+					return false;
+				}
+				if(contained instanceof UnitPayload){
+					px = contained.unit.x;
+					py = contained.unit.y;
+				}else{
+					px = contained.build.x;
+					py = contained.build.y;
+				}
+				if(Mathf.dst(fromtile.getX(),fromtile.getY(), px, py)<8){ // make sure its actually within arm's reach.
+					// grab payload.
+					this.targetpayload = true;
+				}else {
+					return false;
+				}
+			}else{
+				this.targetpayload = false;
+			} 
+			if(!this.canGrabBuilding(frombuild) && !this.targetpayload){
+				return false;
+			}
+			payload = new BuildPayload(frombuild);
+		}
 		if(this.targetpayload){
 			payload = frombuild.getPayload();
 		}
@@ -148,11 +149,14 @@ var inserterBuild = {
 				this.foundtarget = true;
 				return true;
 			}
-		}else if(isPayloadBlock(totile.build) && totile.build.acceptPayload(this,payload)){
-			this.targetout = totile;
-			this.targetin = fromtile;
-			this.foundtarget = true;
-			return true;
+		}else{ 
+			if( (isPayloadBlock(totile.build) && totile.build.acceptPayload(this,payload)) ||
+				(payload instanceof UnitPayload && !totile.solid())	){
+				this.targetout = totile;
+				this.targetin = fromtile;
+				this.foundtarget = true;
+				return true;
+			}
 		}
 		return false;
 		//moving payload
@@ -203,20 +207,38 @@ var inserterBuild = {
 		
 		var toRot = (this.rotation+2)%4; // the other 'side'
 		this.timeoutWait += Time.delta;
-		//not done
+		
+		//grabbing payloads/blocks/units
 		if(this.block.getGrabSize()>1){
 			if(this.pickingup){
 				if(this.foundtarget){ 
-					if(!this.findValidPayloadTransaction(this.targetin,this.targetout)){
+					if(!this.findValidPayloadTransaction(this.targetin,this.targetout)){ //previous target is now invalid, find new target.
 						this.foundtarget=false;
 						this.targetin=null;
 						return;
 					}
-					if(!this.targetpayload){
+					if(!this.targetin.build){//were picking up units
+						var unit = Units.closest(this.team,this.targetin.getX(),this.targetin.getY(),7,(u)=>{
+							return u.isAI() && u.isGrounded();
+						});
+						if(!unit){
+							this.foundtarget=false;
+							this.targetin=null;
+							return;
+						}
+						unit.remove();
+						this.grabAndDrop(new UnitPayload(unit),1);
+						Fx.unitPickup.at(unit);
+						if (Vars.net.client()) {
+							Vars.netClient.clearRemovedEntity(unit.id);
+						}
+						return;
+					}
+					if(!this.targetpayload){ //picking up a block
 						this.grabAndDrop(new BuildPayload(this.targetin.build),1);
 						this.targetin.remove();
 						return;
-					}else{
+					}else{ //pickup a payload.
 						this.grabAndDrop(this.targetin.build.takePayload(),1);
 						return;
 					}
@@ -231,7 +253,6 @@ var inserterBuild = {
 						for(var i = this.block.getGrabFrom();i<=this.block.getGrabTo();i++){
 							var fromtile = this.tile.nearby(dirs[this.rotation].x * i, dirs[this.rotation].y * i);
 							if(!fromtile){continue;}
-							if(!fromtile.build){continue;}
 							this.findValidPayloadTransaction(fromtile,totile);
 							if(this.targetin){
 								this.targetArmExtend = i;
@@ -394,6 +415,6 @@ var inserterBuild = {
 when you require("some script"), itll return whatevers in its module.exports.
 */
 module.exports = {
-	block:function(){return deepCopy(inserterBlock);},
-	build:function(){return deepCopy(inserterBuild);}
+	block:function(){return FuncLib.deepCopy(inserterBlock);},
+	build:function(){return FuncLib.deepCopy(inserterBuild);}
 }
