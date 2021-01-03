@@ -4,7 +4,7 @@ const FuncLib = require("facdustrio/funcs");
 const dirs = [{x: 1,y: 0},{x: 0,y: 1},{x: -1,y: 0},{x: 0,y: -1}]; // directions for rotations
 
 function isPayloadBlock(build){
-	return build.block instanceof PayloadConveyor || build.block instanceof PayloadAcceptor;
+	return FuncLib.isPayloadBuild(build);
 }
 var inserterBlock = {
 	_moveDelay:10.0,
@@ -246,7 +246,6 @@ var inserterBuild = {
 				for(var k = this.block.getGrabFrom();k<=this.block.getGrabTo();k++){
 					var totile = this.tile.nearby(dirs[toRot].x * k, dirs[toRot].y * k);
 					if(totile.build && !isPayloadBlock(totile.build)){
-						
 						continue;
 					}
 					if(this.targetin==null){
@@ -268,6 +267,7 @@ var inserterBuild = {
 			}else{
 				if(this.targetout.build && isPayloadBlock(this.targetout.build)){ // place on the payload
 					if(this.targetout.build.acceptPayload(this,this.grabbed)){
+						this.grabbed.set(this.targetout.getX(),this.targetout.getY(),0);
 						this.targetout.build.handlePayload(this,this.grabbed);
 						this.resetToPickup();
 						return;
@@ -407,7 +407,34 @@ var inserterBuild = {
 				this.grabbed.draw();
 			}
 		}
+	},
+	write(write){
+		this.super$write(write);
+		write.f(this.progress);
+		if(this.block.getGrabSize()>1){
+			Payload.write(this.grabbed, write);
+			write.bool(this.pickingup);
+			if(!this.pickingup){
+				write.i(this.targetout.pos())
+			}
+			
+		}
+		//Payload.write(item, write);
+	},
+	read(read, revision){
+		this.super$read(read, revision);
+		this.progress = read.f();
+		if(this.block.getGrabSize()>1){
+			this.grabbed = Payload.read(read);
+			print("reading payload:"+this.grabbed);
+			this.pickingup = read.bool();
+			if(!this.pickingup){
+				this.targetout = Vars.world.tile(read.i());
+			}
+		}
+		// Payload.read(read);
 	}
+	
 	
 }
 

@@ -1,0 +1,10 @@
+{
+	"size": 3,
+	"health": 500,
+	"requirements": [
+		{"item": "copper", "amount": 50},
+		{"item": "iron", "amount": 45},
+		{"item": "silicon", "amount": 25},
+	],
+	"category": "production",
+}
